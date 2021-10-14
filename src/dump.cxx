@@ -131,12 +131,12 @@ void Dump<TF>::save_dump(TF* data, const std::string& varname, int iotime)
 
         auto tmp1 = fields.get_tmp();
         auto tmp2 = fields.get_tmp();
-
+        auto kend = (varname.find("lw_flux") != std::string::npos || varname.find("sw_flux") != std::string::npos) ? gd.kend+1 : gd.kend;
         if (field3d_io.save_field3d(
                     data,
                     tmp1->fld.data(), tmp2->fld.data(),
                     filename, no_offset,
-                    gd.kstart, gd.kend))
+                    gd.kstart, kend))
         {
             master.print_message("FAILED\n");
             throw std::runtime_error("Writing error in dump");

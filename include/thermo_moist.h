@@ -121,6 +121,7 @@ class Thermo_moist : public Thermo<TF>
 
         // cross sections
         std::vector<std::string> crosslist;        ///< List with all crosses from ini file
+        bool swcross_thv;
         bool swcross_b;
         bool swcross_ql;
         bool swcross_qi;

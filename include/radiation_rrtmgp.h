@@ -47,8 +47,7 @@ class Radiation_rrtmgp : public Radiation<TF>
 	public:
 		Radiation_rrtmgp(Master&, Grid<TF>&, Fields<TF>&, Input&);
         virtual ~Radiation_rrtmgp() {}
-
-		bool check_field_exists(std::string name)
+        bool check_field_exists(std::string name)
         { throw std::runtime_error("\"check_field_exists()\" is not implemented in radiation_rrtmpg"); }
 
         void init(Timeloop<TF>&);
@@ -84,6 +83,7 @@ class Radiation_rrtmgp : public Radiation<TF>
         void create_column_shortwave(
                 Input&, Netcdf_handle&, Thermo<TF>&, Stats<TF>&,
                 const Gas_concs<double>&);
+        void create_dump(Dump<TF>&);    
 
         void read_background_profiles(
                 Netcdf_handle&, const Gas_concs<double>&);
@@ -125,10 +125,13 @@ class Radiation_rrtmgp : public Radiation<TF>
         bool sw_clear_sky_stats;
         bool sw_fixed_sza;
 
-        double dt_rad;
-        unsigned long idt_rad;
+        double dt_rad_sw;
+        double dt_rad_lw;
+        unsigned long idt_rad_sw;
+        unsigned long idt_rad_lw;
 
         std::vector<std::string> crosslist;
+        std::vector<std::string> dumplist;
 
         // RRTMGP related variables.
         double tsi_scaling; // Total solar irradiance scaling factor.
@@ -187,5 +190,6 @@ class Radiation_rrtmgp : public Radiation<TF>
 
         std::vector<TF> sw_flux_dn_sfc;
         std::vector<TF> sw_flux_up_sfc;
+
 };
 #endif

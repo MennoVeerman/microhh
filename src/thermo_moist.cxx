@@ -1158,7 +1158,7 @@ bool Thermo_moist<TF>::has_mask(std::string mask_name)
 template<typename TF>
 bool Thermo_moist<TF>::check_field_exists(const std::string name)
 {
-    if (name == "b" || name == "ql" || name == "T" || name == "qi")
+    if (name == "b" || name == "ql" || name == "T" || name == "qi" || name == "thv")
         return true;
     else
         return false;
@@ -1547,6 +1547,7 @@ void Thermo_moist<TF>::create_cross(Cross<TF>& cross)
 {
     if (cross.get_switch())
     {
+        swcross_thv = false;
         swcross_b = false;
         swcross_ql = false;
         swcross_qi = false;
@@ -1555,6 +1556,7 @@ void Thermo_moist<TF>::create_cross(Cross<TF>& cross)
         swcross_qlqithv = false;
 
         // Vectors with allowed cross variables for buoyancy and liquid water.
+        const std::vector<std::string> allowed_crossvars_thv {"thv", "thvbot","thvfluxbot"};
         const std::vector<std::string> allowed_crossvars_b = {"b", "bbot", "bfluxbot"};
         const std::vector<std::string> allowed_crossvars_ql = {"ql", "qlpath", "qlbase", "qltop"};
         const std::vector<std::string> allowed_crossvars_qi = {"qi", "qipath"};
@@ -1563,6 +1565,7 @@ void Thermo_moist<TF>::create_cross(Cross<TF>& cross)
         const std::vector<std::string> allowed_crossvars_misc = {"w500hpa"};
         const std::vector<std::string> allowed_crossvars_qlqithv = {"qlqicore_max_thv_prime"};
 
+        std::vector<std::string> thvvars  = cross.get_enabled_variables(allowed_crossvars_thv);
         std::vector<std::string> bvars  = cross.get_enabled_variables(allowed_crossvars_b);
         std::vector<std::string> qlvars = cross.get_enabled_variables(allowed_crossvars_ql);
         std::vector<std::string> qivars = cross.get_enabled_variables(allowed_crossvars_qi);
@@ -1570,6 +1573,9 @@ void Thermo_moist<TF>::create_cross(Cross<TF>& cross)
         std::vector<std::string> qsatvars = cross.get_enabled_variables(allowed_crossvars_qsat);
         std::vector<std::string> miscvars = cross.get_enabled_variables(allowed_crossvars_misc);
         std::vector<std::string> qlqithvvars = cross.get_enabled_variables(allowed_crossvars_qlqithv);
+
+        if (thvvars.size() > 0)
+            swcross_thv  = true;
 
         if (bvars.size() > 0)
             swcross_b  = true;
@@ -1591,6 +1597,7 @@ void Thermo_moist<TF>::create_cross(Cross<TF>& cross)
 
         // Merge into one vector
         crosslist = bvars;
+        crosslist.insert(crosslist.end(), thvvars.begin(), thvvars.end());
         crosslist.insert(crosslist.end(), qlvars.begin(), qlvars.end());
         crosslist.insert(crosslist.end(), qivars.begin(), qivars.end());
         crosslist.insert(crosslist.end(), qlqivars.begin(), qlqivars.end());
@@ -1743,6 +1750,22 @@ void Thermo_moist<TF>::exec_cross(Cross<TF>& cross, unsigned long iotime)
 
     auto output = fields.get_tmp();
 
+    if (swcross_thv)
+    {
+        get_thermo_field(*output, "thv", false, true);
+        get_thermo_field(*output, "thv_fluxbot", false, true);
+    }
+
+    for (auto& it : crosslist)
+    {
+        if (it == "thv")
+            cross.cross_simple(output->fld.data(), "thv", iotime, gd.sloc);
+        else if (it == "thvbot")
+            cross.cross_plane(output->fld_bot.data(), "thv_bot", iotime);
+        else if (it == "thvfluxbot")
+            cross.cross_plane(output->flux_bot.data(), "thv_fluxbot", iotime);
+    }
+    
     if (swcross_b)
     {
         get_thermo_field(*output, "b", false, true);

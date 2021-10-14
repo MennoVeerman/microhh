@@ -428,7 +428,7 @@ void Model<TF>::exec()
                     const double dt = timeloop->get_dt();
 
                     // NOTE: `radiation->exec_all_stats()` needs to stay before `calculate_statistics()`...
-                    if (stats->do_statistics(itime) || cross->do_cross(itime) || column->do_column(itime))
+                    if (stats->do_statistics(itime) || cross->do_cross(itime) || column->do_column(itime) || dump->do_dump(itime))
                     {
                         radiation->exec_all_stats(
                                 *stats, *cross, *dump, *column,

@@ -35,6 +35,7 @@
 #include "column.h"
 #include "constants.h"
 #include "timeloop.h"
+#include "dump.h"
 
 // RRTMGP headers.
 #include "Array.h"
@@ -719,7 +720,8 @@ Radiation_rrtmgp<TF>::Radiation_rrtmgp(
 
     sw_clear_sky_stats = inputin.get_item<bool>("radiation", "swclearskystats", "", false);
 
-    dt_rad = inputin.get_item<double>("radiation", "dt_rad", "");
+    dt_rad_lw = inputin.get_item<double>("radiation", "dt_rad_lw", "");
+    dt_rad_sw = inputin.get_item<double>("radiation", "dt_rad_sw", "");
 
     t_sfc       = inputin.get_item<double>("radiation", "t_sfc"      , "");
     emis_sfc    = inputin.get_item<double>("radiation", "emis_sfc"   , "");
@@ -739,7 +741,8 @@ Radiation_rrtmgp<TF>::Radiation_rrtmgp(
     }
 
     auto& gd = grid.get_grid_data();
-    fields.init_diagnostic_field("thlt_rad", "Tendency by radiation", "K s-1", "radiation", gd.sloc);
+    fields.init_diagnostic_field("thlt_rad_sw", "Tendency by shortwave radiation", "K s-1", "radiation", gd.sloc);
+    fields.init_diagnostic_field("thlt_rad_lw", "Tendency by longwave radiation", "K s-1", "radiation", gd.sloc);
 }
 
 template<typename TF>
@@ -747,11 +750,14 @@ void Radiation_rrtmgp<TF>::init(Timeloop<TF>& timeloop)
 {
     auto& gd = grid.get_grid_data();
 
-    idt_rad = static_cast<unsigned long>(timeloop.get_ifactor() * dt_rad + 0.5);
+    idt_rad_lw = static_cast<unsigned long>(timeloop.get_ifactor() * dt_rad_lw + 0.5);
+    idt_rad_sw = static_cast<unsigned long>(timeloop.get_ifactor() * dt_rad_sw + 0.5);
 
     // Check if restarttime is dividable by dt_rad
-    if (timeloop.get_isavetime() % idt_rad != 0)
-        throw std::runtime_error("Restart \"savetime\" is not an (integer) multiple of \"dt_rad\"");
+    if (timeloop.get_isavetime() % idt_rad_lw != 0)
+        throw std::runtime_error("Restart \"savetime\" is not an (integer) multiple of \"dt_rad_lw\"");
+    if (timeloop.get_isavetime() % idt_rad_sw != 0)
+        throw std::runtime_error("Restart \"savetime\" is not an (integer) multiple of \"dt_rad_sw\"");
 
     // Resize surface radiation fields
     lw_flux_dn_sfc.resize(gd.ijcells);
@@ -764,7 +770,7 @@ void Radiation_rrtmgp<TF>::init(Timeloop<TF>& timeloop)
 template<typename TF>
 unsigned long Radiation_rrtmgp<TF>::get_time_limit(unsigned long itime)
 {
-    unsigned long idtlim = idt_rad - itime % idt_rad;
+    unsigned long idtlim = std::min(idt_rad_lw,idt_rad_sw) - itime % std::min(idt_rad_lw,idt_rad_sw);
     return idtlim;
 }
 
@@ -813,18 +819,25 @@ void Radiation_rrtmgp<TF>::create(
 
     // Get the allowed cross sections from the cross list
     std::vector<std::string> allowed_crossvars_radiation;
+    std::vector<std::string> allowed_dumpvars_radiation;
 
     if (sw_shortwave)
     {
         allowed_crossvars_radiation.push_back("sw_flux_up");
         allowed_crossvars_radiation.push_back("sw_flux_dn");
         allowed_crossvars_radiation.push_back("sw_flux_dn_dir");
+        allowed_dumpvars_radiation.push_back("sw_flux_up");
+        allowed_dumpvars_radiation.push_back("sw_flux_dn");
+        allowed_dumpvars_radiation.push_back("sw_flux_dn_dir");
 
         if (sw_clear_sky_stats)
         {
             allowed_crossvars_radiation.push_back("sw_flux_up_clear");
             allowed_crossvars_radiation.push_back("sw_flux_dn_clear");
             allowed_crossvars_radiation.push_back("sw_flux_dn_dir_clear");
+            allowed_dumpvars_radiation.push_back("sw_flux_up_clear");
+            allowed_dumpvars_radiation.push_back("sw_flux_dn_clear");
+            allowed_dumpvars_radiation.push_back("sw_flux_dn_dir_clear");
         }
     }
 
@@ -832,15 +845,26 @@ void Radiation_rrtmgp<TF>::create(
     {
         allowed_crossvars_radiation.push_back("lw_flux_up");
         allowed_crossvars_radiation.push_back("lw_flux_dn");
+        allowed_dumpvars_radiation.push_back("lw_flux_up");
+        allowed_dumpvars_radiation.push_back("lw_flux_dn");
 
         if (sw_clear_sky_stats)
         {
             allowed_crossvars_radiation.push_back("lw_flux_up_clear");
             allowed_crossvars_radiation.push_back("lw_flux_dn_clear");
+            allowed_dumpvars_radiation.push_back("lw_flux_up_clear");
+            allowed_dumpvars_radiation.push_back("lw_flux_dn_clear");
         }
     }
 
     crosslist = cross.get_enabled_variables(allowed_crossvars_radiation);
+    
+    std::vector<std::string>& dumplist_global = dump.get_dumplist();
+    for (int ivar=0; ivar<dumplist_global.size(); ++ivar)
+    {
+        if (std::find(allowed_dumpvars_radiation.begin(), allowed_dumpvars_radiation.end(), dumplist_global[ivar]) != allowed_dumpvars_radiation.end())
+            dumplist.push_back(dumplist_global[ivar]); 
+    }
 }
 
 template<typename TF>
@@ -1154,13 +1178,13 @@ void Radiation_rrtmgp<TF>::exec(
         Thermo<TF>& thermo, const double time, Timeloop<TF>& timeloop, Stats<TF>& stats)
 {
     auto& gd = grid.get_grid_data();
-
-    const bool do_radiation = ((timeloop.get_itime() % idt_rad == 0) && !timeloop.in_substep()) ;
-
+    const bool do_rad_lw = ((timeloop.get_itime() % idt_rad_lw == 0) && !timeloop.in_substep()) ;
+    const bool do_rad_sw = ((timeloop.get_itime() % idt_rad_sw == 0) && !timeloop.in_substep()) ;
+    
+    const bool do_radiation = do_rad_lw || do_rad_sw;
+    
     if (do_radiation)
     {
-        // Set the tendency to zero.
-        std::fill(fields.sd.at("thlt_rad")->fld.begin(), fields.sd.at("thlt_rad")->fld.end(), TF(0.));
 
         auto t_lay = fields.get_tmp();
         auto t_lev = fields.get_tmp();
@@ -1196,8 +1220,11 @@ void Radiation_rrtmgp<TF>::exec(
 
         try
         {
-            if (sw_longwave)
+            if (sw_longwave && do_rad_lw)
             {
+                // Set the tendency to zero.
+                std::fill(fields.sd.at("thlt_rad_lw")->fld.begin(), fields.sd.at("thlt_rad_lw")->fld.end(), TF(0.));
+                
                 exec_longwave(
                         thermo, timeloop, stats,
                         flux_up, flux_dn, flux_net,
@@ -1205,7 +1232,7 @@ void Radiation_rrtmgp<TF>::exec(
                         compute_clouds);
 
                 calc_tendency(
-                        fields.sd.at("thlt_rad")->fld.data(),
+                        fields.sd.at("thlt_rad_lw")->fld.data(),
                         flux_up.ptr(), flux_dn.ptr(),
                         fields.rhoref.data(), thermo.get_exner_vector().data(),
                         gd.dz.data(),
@@ -1224,8 +1251,10 @@ void Radiation_rrtmgp<TF>::exec(
                         gd.imax);
             }
 
-            if (sw_shortwave)
+            if (sw_shortwave && do_rad_sw)
             {
+                // Set the tendency to zero.
+                std::fill(fields.sd.at("thlt_rad_sw")->fld.begin(), fields.sd.at("thlt_rad_sw")->fld.end(), TF(0.));
                 if (!sw_fixed_sza)
                 {
                     // Update the solar zenith angle, and calculate new shortwave reference column
@@ -1282,7 +1311,7 @@ void Radiation_rrtmgp<TF>::exec(
                             compute_clouds);
 
                     calc_tendency(
-                            fields.sd.at("thlt_rad")->fld.data(),
+                            fields.sd.at("thlt_rad_sw")->fld.data(),
                             flux_up.ptr(), flux_dn.ptr(),
                             fields.rhoref.data(), thermo.get_exner_vector().data(),
                             gd.dz.data(),
@@ -1328,11 +1357,18 @@ void Radiation_rrtmgp<TF>::exec(
     // Always add the tendency.
     add_tendency(
             fields.st.at("thl")->fld.data(),
-            fields.sd.at("thlt_rad")->fld.data(),
+            fields.sd.at("thlt_rad_lw")->fld.data(),
+            gd.istart, gd.iend, gd.jstart, gd.jend, gd.kstart, gd.kend,
+            gd.icells, gd.ijcells);
+
+    add_tendency(
+            fields.st.at("thl")->fld.data(),
+            fields.sd.at("thlt_rad_sw")->fld.data(),
             gd.istart, gd.iend, gd.jstart, gd.jend, gd.kstart, gd.kend,
             gd.icells, gd.ijcells);
 
     stats.calc_tend(*fields.st.at("thl"), tend_name);
+
 }
 
 
@@ -1391,9 +1427,10 @@ void Radiation_rrtmgp<TF>::exec_all_stats(
     const bool do_stats  = stats.do_statistics(itime);
     const bool do_cross  = cross.do_cross(itime) && crosslist.size() > 0;
     const bool do_column = column.do_column(itime);
+    const bool do_dump   = dump.do_dump(itime);
 
     // Return in case of no stats or cross section.
-    if ( !(do_stats || do_cross || do_column) )
+    if ( !(do_stats || do_cross || do_column || do_dump) )
         return;
 
     const TF no_offset = 0.;
@@ -1447,7 +1484,7 @@ void Radiation_rrtmgp<TF>::exec_all_stats(
     auto save_stats_and_cross = [&](
             const Array<double,2>& array, const std::string& name, const std::array<int,3>& loc)
     {
-        if (do_stats || do_cross || do_column)
+        if (do_stats || do_cross || do_column || do_dump)
         {
             // Make sure that the top boundary is taken into account in case of fluxes.
             const int kend = gd.kstart + array.dim(2);
@@ -1472,6 +1509,12 @@ void Radiation_rrtmgp<TF>::exec_all_stats(
 
         if (do_column)
             column.calc_column(name, tmp->fld.data(), no_offset);
+        
+        if (do_dump)
+        {
+            if (std::find(dumplist.begin(), dumplist.end(), name) != dumplist.end())
+                dump.save_dump(tmp->fld.data(), name, iotime);
+        }
     };
 
     try
