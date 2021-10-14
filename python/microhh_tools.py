@@ -355,14 +355,15 @@ def get_cross_indices(variable, mode):
     """ Find the cross-section indices given a variable name and mode (in 'xy','xz','yz') """
     if mode not in ['xy', 'xz', 'yz']:
         raise ValueError('\"mode\" should be in {\"xy\", \"xz\", \"yz\"}')
-
+    
     # Get a list of all the cross-section files
-    files = glob.glob('{}.{}.*.*'.format(variable, mode))
+    files = glob.glob('{}.{}.*'.format(variable, mode))
     if len(files) == 0:
         raise Exception('Cannot find any cross-section')
 
     # Get a list with all the cross-section files for one time
-    time = files[0].split('.')[-1]
+    time = np.sort(files)[0].split('.')[-1]
+    
     files = glob.glob('{}.{}.*.{}'.format(variable, mode, time))
 
     # Get the indices
